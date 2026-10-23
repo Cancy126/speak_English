@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+secrets/*.key
+secrets/*.pem
+
+# Private notes (already tracked in git — see project memory before removing)
+private/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.db-journal
+*.sqlite3
+
+# Uploads
+uploads/
+*.mp3
+*.wav
+
+# Model weights (vendored by hand into third-party/; never commit GB-scale binaries)
+third-party/faster-whisper/
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.ckpt
+
+# Docker
+.docker-volume/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log

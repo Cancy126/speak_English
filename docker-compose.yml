@@ -1,0 +1,45 @@
+services:
+  backend:
+    build: ./src/backend
+    container_name: speak-backend
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./data/speak_english.db
+      UPLOAD_DIR: ./uploads/audio
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen-turbo}
+      PRONUNCIATION_ENGINE: ${PRONUNCIATION_ENGINE:-faster-whisper}
+      WHISPER_MODEL_DIR: /app/third-party/faster-whisper
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      HF_HUB_OFFLINE: "1"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123456}
+      CORS_ORIGINS: '["http://localhost","http://localhost:5173"]'
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+      # Weights are gitignored and never baked into the image; mount them read-only.
+      # Without this the container silently degrades to content-only scoring.
+      - ./third-party/faster-whisper:/app/third-party/faster-whisper:ro
+    restart: unless-stopped
+    # 2c4G budget: cap so a speech model cannot take the box down.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+
+  frontend:
+    build: ./src/frontend
+    container_name: speak-frontend
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+  backend_uploads:

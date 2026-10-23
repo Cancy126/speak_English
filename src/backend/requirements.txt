@@ -1,0 +1,48 @@
+# Python 3.12 required (3.14 has no cp314 wheels for pydantic-core/uvloop/
+# httptools/pyyaml; 3.11 is rejected by ESPnet's >=3.12,<3.14).
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+alembic==1.14.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+# Direct bcrypt: passlib 1.7.4 (unmaintained since 2020) crashes on startup with
+# bcrypt >= 4.1 because its backend probe feeds a >72-byte password.
+bcrypt==5.0.0
+python-multipart==0.0.20
+
+# HTTP client (for calling LLM APIs)
+httpx==0.28.1
+
+# TTS. 7.0.0 is dead: Microsoft added the Sec-MS-GEC clock signature and the
+# old client gets HTTP 403 on wss://speech.platform.bing.com.
+edge-tts==7.3.1
+
+# Pronunciation scoring / server-side STT (weights vendored under third-party/).
+# av must stay <19: faster-whisper 1.2.1 calls av.open(metadata_errors=...), a
+# kwarg PyAV 19 removed, so the transcribe call dies with TypeError.
+faster-whisper==1.2.1
+av==18.1.0
+# ARPA->IPA display. eng_to_ipa.__all__ advertises a non-existent `en_to_ipa`;
+# import `convert` from the transcribe submodule instead.
+eng-to-ipa==0.0.2
+
+# Utils
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+# EmailStr validation in schemas
+email-validator==2.2.0
+
+# Linting / type checking
+ruff==0.9.4
+mypy==1.14.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0

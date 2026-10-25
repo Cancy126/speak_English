@@ -1,5 +1,6 @@
 import { ScoreCard } from './ScoreCard';
 import { parseFeedback, scoreTone } from '../utils/format';
+import { useI18n } from '../i18n';
 import type { Message, ScoreCard as ScoreCardType } from '../types';
 
 interface Props {
@@ -12,9 +13,13 @@ interface Props {
 }
 
 export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, score }: Props) {
+  const { t } = useI18n();
   const isUser = message.role === 'user';
   const feedback = !isUser ? parseFeedback(message.feedback) : null;
-  const corrections = (feedback?.corrections as { original: string; fixed: string; reason: string }[] | undefined) ?? [];
+  const corrections =
+    (feedback?.corrections as
+      | { original: string; fixed: string; reason: string }[]
+      | undefined) ?? [];
   const natural = feedback?.natural as { original: string; better: string } | null | undefined;
   const vocab = feedback?.vocab as { from: string; to: string; why: string } | null | undefined;
 
@@ -37,16 +42,27 @@ export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, scor
           <details className="group rounded-lg border border-slate-200 bg-white">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-1 text-[11px]">
               <span className="flex items-baseline gap-1.5">
-                <span className={`font-semibold ${scoreTone(score.pronunciation.overall)}`}>
-                  {score.pronunciation.overall.toFixed(0)}
-                </span>
+                {score.pronunciation.attempt_ok ? (
+                  <span className={`font-semibold ${scoreTone(score.pronunciation.overall)}`}>
+                    {score.pronunciation.overall.toFixed(0)}
+                  </span>
+                ) : (
+                  // A withheld judgement must not look like a score of zero.
+                  <span className="font-semibold text-amber-700">
+                    {score.pronunciation.reject_code === 'silent'
+                      ? t('chat.rejectedSilent')
+                      : t('chat.rejectedNotRead')}
+                  </span>
+                )}
                 <span className="text-slate-400">
-                  {score.mode === 'free' ? '自由表达' : '跟读'}
-                  {score.pronunciation.wer !== null && ` · WER ${score.pronunciation.wer.toFixed(0)}%`}
+                  {score.mode === 'free' ? t('score.badgeFree') : t('score.badgeRead')}
+                  {score.pronunciation.attempt_ok &&
+                    score.pronunciation.wer !== null &&
+                    ` · ${t('score.wer', { value: score.pronunciation.wer.toFixed(0) })}`}
                 </span>
               </span>
-              <span className="text-slate-300 group-open:hidden">详情 ▾</span>
-              <span className="hidden text-slate-300 group-open:inline">收起 ▴</span>
+              <span className="text-slate-300 group-open:hidden">{t('bubble.detail')}</span>
+              <span className="hidden text-slate-300 group-open:inline">{t('bubble.collapse')}</span>
             </summary>
             <div className="border-t border-slate-100 p-2">
               <ScoreCard
@@ -64,7 +80,7 @@ export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, scor
               onClick={() => onSpeak(message.content)}
               className="text-xs text-slate-400 hover:text-brand-600"
             >
-              🔊 Listen
+              {t('bubble.listen')}
             </button>
             {onRepeat && (
               <button
@@ -72,7 +88,7 @@ export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, scor
                 onClick={() => onRepeat(message)}
                 className={`text-xs hover:text-brand-600 ${repeating ? 'text-rose-600' : 'text-slate-400'}`}
               >
-                {repeating ? '● 正在录音…' : '🎙️ 跟读评测'}
+                {repeating ? t('bubble.repeating') : t('bubble.repeat')}
               </button>
             )}
           </div>
@@ -80,7 +96,7 @@ export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, scor
 
         {(corrections.length > 0 || natural || vocab) && (
           <div className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            <p className="font-medium">Feedback on your last turn</p>
+            <p className="font-medium">{t('bubble.feedbackTitle')}</p>
             {corrections.map((c) => (
               <p key={c.original}>
                 ✏️ <span className="line-through opacity-70">{c.original}</span> →{' '}
@@ -90,12 +106,12 @@ export function ChatBubble({ message, onSpeak, onRepeat, repeating = false, scor
             ))}
             {natural && (
               <p>
-                💬 Say it like: <span className="font-medium">{natural.better}</span>
+                💬 {t('bubble.sayLike')} <span className="font-medium">{natural.better}</span>
               </p>
             )}
             {vocab && (
               <p>
-                📈 Try <span className="font-medium">{vocab.to}</span> instead of {vocab.from}
+                📈 {t('bubble.tryWord', { to: vocab.to, from: vocab.from })}
                 {vocab.why ? <span className="opacity-70"> — {vocab.why}</span> : null}
               </p>
             )}

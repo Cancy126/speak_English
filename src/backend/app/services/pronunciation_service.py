@@ -22,11 +22,36 @@ except ImportError as _ipa_exc:  # pragma: no cover
 # Expected speaking rate for the fluency ratio, words per second. A learner read
 # at ~2.8 wps scores 100; slower than that is scaled down linearly.
 FLUENCY_TARGET_WPS = 2.8
+
+# Attempt validity gates (产品规划 3.2.7). Calibrated against the ten real browser
+# recordings on disk rather than guessed: silence takes measured 0.7s of speech
+# inside 12.1s of audio (6%), while the shortest genuine attempt was 1.7s/2.8s (60%),
+# and off-topic read-alouds landed at 0.43 alignment versus 0.52-1.00 for real ones.
+MIN_SPEECH_MS = 800        # first-to-last word span; below this nothing was said
+MIN_SPEECH_RATIO = 0.15    # ... or the take is mostly silence inside a long recording
+MIN_LONG_TAKE_MS = 4000    # ratio gate only applies to takes long enough to be judged
+MIN_READ_ALIGNMENT = 0.5   # read-aloud: share of the reference actually recognised
+
+# Stable codes the UI branches on; the human text lives in `PronunciationResult.note`.
+REJECT_SILENT = "silent"
+REJECT_NOT_READ = "not_read_aloud"
+
 _TOKEN = re.compile(r"[A-Za-z']+")
 
 
 def tokenize(text: str) -> list[str]:
     return _TOKEN.findall(text or "")
+
+
+def _norm(token: str) -> str:
+    """Comparison key for a token.
+
+    Whisper emits lowercase text while references are written as sentences
+    ("Are you ready..."), so an unnormalised compare marked every sentence-initial
+    word as misread: a perfect read of a 5-word reference scored WER 20% on a
+    capital-A. Display still uses the reference's own casing.
+    """
+    return token.lower().rstrip("'")
 
 
 class PronunciationService:
@@ -85,23 +110,29 @@ class PronunciationService:
     def score_words(self, reference: str, heard: list) -> tuple[list[WordScore], dict]:
         """Align reference tokens to transcript words. Returns per-word scores + metrics."""
         ref = tokenize(reference)
-        hyp_tokens = [tokenize(w.word)[0] if tokenize(w.word) else "" for w in heard]
-        hyp_pairs = list(zip(hyp_tokens, heard))
-        hyp_pairs = [(t, w) for t, w in hyp_pairs if t]
-        hyp_tokens = [t for t, _ in hyp_pairs]
+        # Compare on normalised keys, display the reference's own casing: Whisper
+        # lowercases while references are written as sentences.
+        ref_keys = [_norm(t) for t in ref]
+        hyp_pairs = []
+        for w in heard:
+            tokens = tokenize(w.word)
+            if tokens:
+                hyp_pairs.append((_norm(tokens[0]), tokens[0], w))
+        hyp_keys = [k for k, _, _ in hyp_pairs]
 
-        matcher = SequenceMatcher(None, ref, hyp_tokens)
+        matcher = SequenceMatcher(None, ref_keys, hyp_keys)
         words: list[WordScore] = []
-        deletes = inserts = replaces = 0
+        deletes = inserts = replaces = matched = 0
 
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
+                matched += i2 - i1
                 for k in range(i2 - i1):
-                    rw, (hw, wobj) = ref[i1 + k], hyp_pairs[j1 + k]
+                    rw, (hw, _, wobj) = ref[i1 + k], hyp_pairs[j1 + k]
                     conf = max(0.0, min(1.0, wobj.confidence))
                     words.append(WordScore(
                         word=rw, score=round(conf * 100, 1), status="matched",
-                        expected_ipa=self._ipa(rw),
+                        expected_ipa=self._ipa(rw), heard_as=hw,
                         start=round(wobj.start, 2), end=round(wobj.end, 2),
                     ))
             elif tag == "replace":
@@ -115,7 +146,7 @@ class PronunciationService:
                 deletes += max(0, len(ref_span) - pairs)
                 for k in range(pairs):
                     rw = ref[ref_span[k]]
-                    hw, wobj = hyp_pairs[hyp_span[k]]
+                    _, hw, wobj = hyp_pairs[hyp_span[k]]
                     conf = max(0.0, min(1.0, wobj.confidence))
                     words.append(WordScore(
                         word=rw, score=round(min(conf * 100, 45.0), 1), status="substituted",
@@ -145,6 +176,11 @@ class PronunciationService:
             "accuracy": round(accuracy, 1),
             "completeness": round(completeness, 1),
             "wer": round(wer * 100, 1),
+            # Share of the reference actually recognised in the right place — the
+            # number the read-aloud tolerance gate below judges attempts by.
+            "alignment": round(matched / ref_n, 3),
+            "ref_words": len(ref),
+            "matched": matched,
             "deletes": deletes, "inserts": inserts, "replaces": replaces,
         }
 
@@ -158,6 +194,69 @@ class PronunciationService:
         score -= long_gaps * 8.0
         return round(max(0.0, min(100.0, score)), 1)
 
+    def _rejected(self, code: str, note: str, hyp=None) -> PronunciationResult:
+        """A take that cannot be judged. Scores stay at zero *and* `attempt_ok=False`,
+        so no caller can mistake the absence of a score for a score of zero."""
+        return PronunciationResult(
+            accuracy=0.0,
+            fluency=0.0,
+            completeness=0.0,
+            overall=0.0,
+            words=[],
+            engine=f"faster-whisper:{self.model_dir.name}",
+            available=True,
+            note=note,
+            transcript=(hyp.text or None) if hyp is not None else None,
+            wer=None,
+            attempt_ok=False,
+            reject_code=code,
+        )
+
+    def assess_attempt(self, hyp, m: dict | None = None) -> PronunciationResult | None:
+        """Gate takes that carry nothing to score. Returns None when scorable.
+
+        Both thresholds come from the real recordings on disk, not from intuition:
+        - a 12.06s take that only said 'Hello?' measured 0.7s of speech (6% of the
+          take) yet still scored a low-but-real-looking number; genuine attempts
+          measured 1.7-11.5s of speech at 51-93%.
+        - read-aloud takes that were not the reference sentence aligned at 0.00 and
+          0.43 against the same sentence, while real reads aligned 0.52-1.00.
+          Scoring those as "bad pronunciation" taught the learner the wrong thing:
+          the metric conflated "did not read this" with "read it badly".
+        """
+        words = getattr(hyp, "words", None) or []
+        duration = float(getattr(hyp, "duration", 0.0) or 0.0)
+        span = (words[-1].end - words[0].start) if words else 0.0
+
+        if not words or span * 1000 < MIN_SPEECH_MS:
+            heard = (hyp.text or "").strip()
+            return self._rejected(
+                REJECT_SILENT,
+                "没听到有效语音（说话不足 "
+                f"{MIN_SPEECH_MS / 1000:.1f} 秒），本次不评发音"
+                + (f"。听到的是：'{heard}'" if heard else "。请靠近麦克风，把整句完整读一遍"),
+                hyp,
+            )
+
+        if duration * 1000 >= MIN_LONG_TAKE_MS and span / duration < MIN_SPEECH_RATIO:
+            return self._rejected(
+                REJECT_SILENT,
+                f"录音 {duration:.1f} 秒里只有 {span:.1f} 秒是说话（{span / duration:.0%}），"
+                "其余是静音，本次不评发音。请完整录下你要练的那句",
+                hyp,
+            )
+
+        if m is not None and m.get("alignment") is not None:
+            if m["alignment"] < MIN_READ_ALIGNMENT:
+                return self._rejected(
+                    REJECT_NOT_READ,
+                    f"没有按要求跟读：参考句 {m['ref_words']} 个词里只对上 "
+                    f"{m['matched']} 个（{m['alignment']:.0%}），分数无法反映发音好坏。"
+                    f"听到的是：'{(hyp.text or '').strip()}' —— 请先听一遍标准音，再照着原句重读",
+                    hyp,
+                )
+        return None
+
     def score_free(self, hyp) -> PronunciationResult:
         """Score a free-spoken recording, where no reference sentence exists.
 
@@ -170,6 +269,10 @@ class PronunciationService:
           how little of the take was silence.
         - fluency    = speaking rate plus long-pause penalty, same as read-aloud.
         """
+        rejected = self.assess_attempt(hyp)
+        if rejected is not None:
+            return rejected
+
         words: list[WordScore] = []
         confs: list[float] = []
         for w in hyp.words:
@@ -212,9 +315,13 @@ class PronunciationService:
         )
 
     async def score(self, audio_path: Path, reference_text: str) -> PronunciationResult:
-        """Transcribe then align. Raises on missing weights or decode failure."""
+        """Transcribe, gate the take, then align. Raises on missing weights or decode failure."""
         hyp = await whisper_service.transcribe(audio_path)
         words, m = self.score_words(reference_text, hyp.words)
+
+        rejected = self.assess_attempt(hyp, m)
+        if rejected is not None:
+            return rejected
 
         gaps: list[float] = []
         for prev, cur in zip(hyp.words, hyp.words[1:]):

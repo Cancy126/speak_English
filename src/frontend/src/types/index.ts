@@ -10,18 +10,22 @@ export interface User {
 
 export interface TokenResponse {
   access_token: string;
+  /** Only accepted by /auth/refresh; the API rejects it as an access token. */
+  refresh_token: string;
   token_type: string;
   expires_in: number;
 }
 
 export interface Conversation {
   id: number;
+  /** Learner-chosen name; empty falls back to topic/scene (see conversationLabel). */
+  title: string | null;
   topic: string | null;
   scene: string | null;
   status: string;
   created_at: string;
   updated_at: string;
-  /** Set while the conversation sits in the trash; null means live. */
+  /** Set while the conversation sits in the trash and can still be restored. */
   deleted_at: string | null;
 }
 
@@ -88,6 +92,13 @@ export interface PronunciationResult {
   /** What the STT engine heard; word-level scoring has no phoneme detail yet. */
   transcript: string | null;
   wer: number | null;
+  /**
+   * False when the take itself could not be judged (silence, or words that are not
+   * the reference sentence). The numbers below are then placeholders, not scores —
+   * render `note` instead of a zero (产品规划 3.2.7).
+   */
+  attempt_ok: boolean;
+  reject_code: 'silent' | 'not_read_aloud' | null;
 }
 
 export interface ContentScore {

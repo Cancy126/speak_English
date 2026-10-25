@@ -29,3 +29,22 @@ export async function fetchCapabilities(): Promise<SpeechCapabilities> {
   const { data } = await api.get<SpeechCapabilities>('/speech/capabilities');
   return data;
 }
+
+export interface TtsReply {
+  audio_url: string | null;
+  fallback: string | null;
+  text: string;
+}
+
+/**
+ * Ask the server to synthesize the reply with edge-tts.
+ *
+ * Free of charge, but it is an outbound request to Microsoft and it can legitimately
+ * come back with `audio_url: null` — the caller must then fall through to browser
+ * synthesis instead of going silent. That silent path is exactly what made 🔊 Listen
+ * look broken on phones (产品规划 3.2.9).
+ */
+export async function synthesizeSpeech(text: string): Promise<TtsReply> {
+  const { data } = await api.post<TtsReply>('/speech/tts', { text });
+  return data;
+}

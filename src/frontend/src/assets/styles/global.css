@@ -24,3 +24,16 @@ input,
 textarea {
   font-size: 16px;
 }
+
+/*
+ * Push-to-talk button (产品规划 3.1.5). iOS does not honour `user-select: none` for the
+ * long-press callout — "复制/查找" still pops up, the browser takes the gesture and fires
+ * pointercancel, which used to leave the microphone running. Only this property stops it.
+ */
+.no-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  user-drag: none;
+}

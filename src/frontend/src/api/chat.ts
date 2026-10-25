@@ -1,4 +1,5 @@
 import { api } from './request';
+import { session } from './session';
 import type { ChatReply, Conversation, Message, Topic } from '../types';
 
 export async function fetchTopics(): Promise<Topic[]> {
@@ -39,6 +40,22 @@ export async function restoreConversation(conversationId: number): Promise<Conve
   return data;
 }
 
+/** Permanent delete; the server rejects it unless the conversation is in the trash. */
+export async function purgeConversation(conversationId: number): Promise<void> {
+  await api.delete(`/chat/conversations/${conversationId}/purge`);
+}
+
+/** Learner-chosen name, 1-60 chars to match the server's ConversationRename. */
+export async function renameConversation(
+  conversationId: number,
+  title: string,
+): Promise<Conversation> {
+  const { data } = await api.patch<Conversation>(`/chat/conversations/${conversationId}`, {
+    title: title.trim(),
+  });
+  return data;
+}
+
 export async function sendMessage(
   conversationId: number,
   content: string,
@@ -68,7 +85,10 @@ export async function streamMessage(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('token');
+  // Read through `session`, not the raw key: the interceptor may have rotated the
+  // access token, and SSE bypasses axios, so this is the one place that stamps the
+  // header by hand.
+  const token = session.accessToken();
   const response = await fetch(`/api/chat/conversations/${conversationId}/stream`, {
     method: 'POST',
     headers: {

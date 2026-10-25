@@ -2,12 +2,14 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BubbleSelector } from '../components/BubbleSelector';
 import { useAuth } from '../hooks/useAuth';
+import { useI18n } from '../i18n';
 import { useChatStore } from '../stores/chatStore';
 import type { Topic } from '../types';
 
 export function HomePage() {
   const { topics, loadTopics, startConversation, error } = useChatStore();
   const { user } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -24,11 +26,9 @@ export function HomePage() {
     <div className="space-y-8 py-4">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-slate-800">
-          {user ? `Hey ${user.username}, let's talk` : "Let's talk in English"}
+          {user ? t('home.greeting', { name: user.username }) : t('home.greetingAnon')}
         </h1>
-        <p className="mt-2 text-slate-500">
-          Pick a topic or just start typing — speaking is the only way to get better.
-        </p>
+        <p className="mt-2 text-slate-500">{t('home.subtitle')}</p>
       </div>
 
       <BubbleSelector topics={topics} onPick={pick} />

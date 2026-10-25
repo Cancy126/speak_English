@@ -4,10 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.db.session import AUDIO_DIR, async_session_factory, engine, init_db, seed_admin
+from app.db.session import async_session_factory, engine, init_db, seed_admin
 from app.routers import admin, auth, chat, pronunciation, speech
 from app.services.pronunciation_service import pronunciation_service
 from app.services.retention import purge_expired_trash, purge_orphan_audio
@@ -72,9 +71,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR = AUDIO_DIR.parent
-if STATIC_DIR.exists():
-    app.mount("/uploads", StaticFiles(directory=str(STATIC_DIR)), name="uploads")
+# No static mount for the uploads directory. It used to be mounted here, which put
+# every learner recording at an unauthenticated URL (`/uploads/audio/user-*.webm`)
+# while TTS output sat in the same folder — a public path for one kind of file was
+# unavoidably a public path for the other. Both are now served by authenticated
+# routes: /api/pronunciation/recordings/{id} and /api/speech/tts-file/{name}.
 
 for module in (auth.router, chat.router, speech.router, pronunciation.router, admin.router):
     app.include_router(module)

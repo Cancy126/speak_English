@@ -16,11 +16,14 @@ from app.schemas.chat import (
     ChatReply,
     ConversationCreate,
     ConversationOut,
+    ConversationRename,
     MessageCreate,
     MessageOut,
     TopicOut,
 )
 from app.services.ai_service import HISTORY_WINDOW, TOPICS, AIServiceError, ai_service
+from app.services.retention import purge_conversations
+from app.services.storage_service import StorageService
 from app.services.tts_service import tts_service
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -38,7 +41,9 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Conversation:
-    conversation = Conversation(user_id=current_user.id, topic=body.topic, scene=body.scene)
+    conversation = Conversation(
+        user_id=current_user.id, topic=body.topic, scene=body.scene, title=body.title
+    )
     db.add(conversation)
     await db.flush()
     await db.refresh(conversation)
@@ -101,6 +106,50 @@ async def restore_conversation(
     await db.flush()
     await db.refresh(conversation)
     return conversation
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+async def rename_conversation(
+    conversation_id: int,
+    body: ConversationRename,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Conversation:
+    """Set the learner's own label so conversations are recognisable at a glance."""
+    conversation = await _owned_conversation(conversation_id, db, current_user)
+    conversation.title = body.title  # already trimmed by the schema
+    await db.flush()
+    await db.refresh(conversation)
+    return conversation
+
+
+@router.delete("/conversations/{conversation_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_conversation(
+    conversation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Skip the 7-day recovery window and delete the conversation for real.
+
+    Restricted to conversations already in the trash: without that gate a single
+    stray request would destroy a live conversation plus its recordings with no
+    way back.
+    """
+    conversation = await _owned_conversation(conversation_id, db, current_user, allow_deleted=True)
+    if conversation.deleted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Move the conversation to the trash before deleting it permanently",
+        )
+
+    outcome = await purge_conversations(db, [conversation_id], StorageService())
+    if outcome["file_errors"]:
+        # Rows kept: report rather than half-delete and lose the file paths.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{outcome['file_errors']} recording file(s) could not be removed; nothing deleted",
+        )
+    await db.commit()
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)

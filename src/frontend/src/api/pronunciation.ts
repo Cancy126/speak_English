@@ -36,6 +36,21 @@ export async function listConversationScores(conversationId: number): Promise<St
   return data;
 }
 
+/**
+ * The learner's own take, as a playable object URL.
+ *
+ * Fetched through axios on purpose: the recording route requires the JWT header,
+ * and a plain `<audio src="/api/...">` would send none — the request would 401 and
+ * the card would look broken. The object URL then supports seeking, which is what
+ * makes per-word replay possible.
+ */
+export async function fetchRecordingUrl(assetId: number): Promise<string> {
+  const { data } = await api.get<Blob>(`/pronunciation/recordings/${assetId}`, {
+    responseType: 'blob',
+  });
+  return URL.createObjectURL(data);
+}
+
 export function storedToCard(s: StoredScore): ScoreCard {
   return {
     pronunciation: {
@@ -49,6 +64,9 @@ export function storedToCard(s: StoredScore): ScoreCard {
       note: `历史评测（${new Date(s.created_at).toLocaleString()}）`,
       transcript: s.heard_text,
       wer: s.wer,
+      // Only judged takes are stored, so a row read back is by definition scored.
+      attempt_ok: true,
+      reject_code: null,
     },
     content: null,
     audio_bytes: 0,
@@ -104,9 +122,5 @@ export async function scoreContent(transcript: string): Promise<ContentScore> {
   return data;
 }
 
-export async function synthesizeSpeech(
-  text: string,
-): Promise<{ audio_url: string | null; fallback: string | null; text: string }> {
-  const { data } = await api.post('/speech/tts', { text });
-  return data;
-}
+// TTS lives in api/speech.ts (`synthesizeSpeech`) — one client per endpoint, so the
+// playback path cannot end up pointing at a stale copy of this call.

@@ -3,6 +3,7 @@ import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,6 +121,17 @@ async def score(
             )
 
         content = await pronunciation_service.content_score(hyp.text)
+        if not free_result.attempt_ok:
+            # The take itself was unusable. Keep the recording (it is replayable and
+            # explains why), but write no score row: a rejected attempt is not data.
+            return ScoreCard(
+                pronunciation=free_result,
+                content=None,
+                audio_bytes=len(payload),
+                audio_asset_id=asset.id,
+                mode="free",
+            )
+
         free_record = PronunciationScore(
             message_id=message_id,
             audio_asset_id=asset.id,
@@ -178,8 +190,16 @@ async def score(
             audio_asset_id=asset.id,
         )
 
-    # Persist only real evaluations. Degraded/failed paths above return early, so
-    # no all-zero rows pollute later averages or trends.
+    # Persist only real evaluations. Degraded, failed and rejected paths above
+    # return early, so no all-zero rows pollute later averages or trends.
+    if not result.attempt_ok:
+        return ScoreCard(
+            pronunciation=result,
+            content=None,
+            audio_bytes=len(payload),
+            audio_asset_id=asset.id,
+        )
+
     record = PronunciationScore(
         message_id=message_id,
         audio_asset_id=asset.id,
@@ -207,6 +227,49 @@ async def score(
         audio_bytes=len(payload),
         audio_asset_id=asset.id,
         score_id=record.id,
+    )
+
+
+RECORDING_MEDIA = {
+    "webm": "audio/webm",
+    "ogg": "audio/ogg",
+    "mp4": "audio/mp4",
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+}
+
+
+@router.get("/recordings/{asset_id}")
+async def get_recording(
+    asset_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Stream one of the learner's own takes back to them (3.2.8 replay).
+
+    Own recordings only, via this authenticated route: `main.py` used to mount the
+    whole uploads directory as public static files, and TTS output and learner
+    recordings share that directory. Serving a voice clip therefore cannot be a
+    static path — anyone who knew the URL could listen to someone else's practice.
+    """
+    asset = await db.get(AudioAsset, asset_id)
+    if asset is None or asset.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+
+    path = StorageService().absolute_path(asset.file_path)
+    if not path.is_file():
+        # Purged by the retention sweep while the row still exists.
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="录音文件已过保留期并被清理",
+        )
+
+    suffix = path.suffix.lstrip(".").lower()
+    return FileResponse(
+        path,
+        media_type=RECORDING_MEDIA.get(suffix, "application/octet-stream"),
+        filename=path.name,
     )
 
 

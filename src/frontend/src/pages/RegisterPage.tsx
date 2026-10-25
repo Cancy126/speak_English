@@ -1,9 +1,11 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { useI18n } from '../i18n';
 
 export function RegisterPage() {
   const { register, isAuthenticated, loading, error } = useAuthStore();
+  const { t } = useI18n();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,13 +20,13 @@ export function RegisterPage() {
   return (
     <div className="mx-auto max-w-sm space-y-6 py-8">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Create an account</h1>
-        <p className="mt-1 text-sm text-slate-500">Free to start; your history is saved for you.</p>
+        <h1 className="text-2xl font-bold text-slate-800">{t('register.title')}</h1>
+        <p className="mt-1 text-sm text-slate-500">{t('register.subtitle')}</p>
       </div>
 
       <form onSubmit={submit} className="space-y-4">
         <label className="block space-y-1 text-sm">
-          <span className="text-slate-600">Username</span>
+          <span className="text-slate-600">{t('register.username')}</span>
           <input
             required
             minLength={2}
@@ -34,7 +36,7 @@ export function RegisterPage() {
           />
         </label>
         <label className="block space-y-1 text-sm">
-          <span className="text-slate-600">Email</span>
+          <span className="text-slate-600">{t('login.email')}</span>
           <input
             type="email"
             required
@@ -44,7 +46,7 @@ export function RegisterPage() {
           />
         </label>
         <label className="block space-y-1 text-sm">
-          <span className="text-slate-600">Password</span>
+          <span className="text-slate-600">{t('login.password')}</span>
           <input
             type="password"
             required
@@ -62,14 +64,14 @@ export function RegisterPage() {
           disabled={loading}
           className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white transition hover:bg-brand-700 disabled:opacity-50"
         >
-          {loading ? 'Creating…' : 'Sign up'}
+          {loading ? t('register.submitting') : t('register.submit')}
         </button>
       </form>
 
       <p className="text-center text-sm text-slate-500">
-        Already registered?{' '}
+        {t('register.hasAccount')}{' '}
         <Link to="/login" className="text-brand-600 hover:underline">
-          Sign in
+          {t('register.signIn')}
         </Link>
       </p>
     </div>

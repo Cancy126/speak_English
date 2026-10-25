@@ -38,6 +38,13 @@ class PronunciationResult(BaseModel):
     # What the STT engine actually heard, for  heard-vs-reference comparison.
     transcript: str | None = None
     wer: float | None = None
+    # False when the take itself cannot be judged: silence, or words that are not
+    # the reference sentence. The engine worked (`available` stays true) — there is
+    # just no meaningful pronunciation score, so the UI must show `note` instead of
+    # a number. Never persist these as scored rows (产品规划 3.2.7).
+    attempt_ok: bool = True
+    # silent | not_read_aloud — stable code for the frontend to branch on.
+    reject_code: str | None = None
 
 
 class ContentScore(BaseModel):

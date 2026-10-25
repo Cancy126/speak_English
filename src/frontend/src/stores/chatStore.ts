@@ -8,6 +8,11 @@ export interface SendResult {
   assistantMessageId: number | null;
 }
 
+// Mirrors the server: `conversations.title` is String(60) and ConversationRename
+// caps at 60. Kept in one place so the chat page, the history page and the store
+// cannot disagree about what a valid name is (产品规划 3.4.2).
+export const TITLE_MAX = 60;
+
 interface ChatState {
   topics: Topic[];
   conversations: Conversation[];
@@ -21,6 +26,7 @@ interface ChatState {
   loadConversations: () => Promise<void>;
   startConversation: (topic?: Topic, scene?: string) => Promise<Conversation | null>;
   openConversation: (id: number) => Promise<void>;
+  rename: (id: number, title: string) => Promise<Conversation | null>;
   send: (content: string) => Promise<SendResult>;
   stop: () => void;
   reset: () => void;
@@ -78,6 +84,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ current: match ?? null, messages, streamingText: '', error: null });
     } catch (err) {
       set({ error: errMessage(err) });
+    }
+  },
+
+  // Renaming has to replace the row in `conversations` as well as `current`.
+  // `send()` re-opens the conversation after every turn, and `openConversation`
+  // rebuilds `current` from that list — updating only the header would let the next
+  // message silently restore the old title.
+  rename: async (id, title) => {
+    const clean = title.trim();
+    if (!clean) {
+      set({ error: '对话名不能为空' });
+      return null;
+    }
+    if (clean.length > TITLE_MAX) {
+      set({ error: `对话名最多 ${TITLE_MAX} 个字符` });
+      return null;
+    }
+    try {
+      const updated = await chatApi.renameConversation(id, clean);
+      set((state) => ({
+        conversations: state.conversations.map((c) => (c.id === id ? updated : c)),
+        current: state.current?.id === id ? updated : state.current,
+        error: null,
+      }));
+      return updated;
+    } catch (err) {
+      set({ error: errMessage(err) });
+      return null;
     }
   },
 

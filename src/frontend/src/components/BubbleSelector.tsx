@@ -1,9 +1,15 @@
 import { useState } from 'react';
+import { topicLabel, useI18n } from '../i18n';
 import type { Topic } from '../types';
 
 /**
  * Interest bubbles on the landing page (产品规划 3.1.2): pick a bubble, roll the
  * random button, or ignore both and just start typing.
+ *
+ * The Chinese bubble name comes from the frontend dictionary keyed on `Topic.key`.
+ * `Topic.label` stays English on purpose: it is what gets stored as
+ * `conversations.topic` and what the scenario prompt feeds to the model, so
+ * localising it here keeps the conversation content untouched (产品规划 3.1.7).
  */
 export function BubbleSelector({
   topics,
@@ -14,12 +20,13 @@ export function BubbleSelector({
   onPick: (topic: Topic | null) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const [shuffleKey, setShuffleKey] = useState(0);
   const shown = shuffleKey === 0 ? topics : [...topics].sort(() => Math.random() - 0.5);
 
   return (
     <section className="space-y-5">
-      <p className="text-center text-lg text-slate-600">What do you want to talk about?</p>
+      <p className="text-center text-lg text-slate-600">{t('bubble.question')}</p>
 
       <ul className="flex flex-wrap justify-center gap-3">
         {shown.map((topic, index) => (
@@ -33,7 +40,7 @@ export function BubbleSelector({
               <span aria-hidden className="text-base">
                 {topic.emoji}
               </span>
-              <span>{topic.label}</span>
+              <span>{topicLabel(topic.key, topic.label, t)}</span>
             </button>
           </li>
         ))}
@@ -46,7 +53,7 @@ export function BubbleSelector({
           onClick={() => setShuffleKey((k) => k + 1)}
           className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
         >
-          🔀 Shuffle
+          {t('bubble.shuffle')}
         </button>
         <button
           type="button"
@@ -54,7 +61,7 @@ export function BubbleSelector({
           onClick={() => onPick(topics[Math.floor(Math.random() * topics.length)] ?? null)}
           className="rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-700"
         >
-          🎲 Surprise me
+          {t('bubble.surprise')}
         </button>
         <button
           type="button"
@@ -62,7 +69,7 @@ export function BubbleSelector({
           onClick={() => onPick(null)}
           className="rounded-full px-4 py-2 text-sm text-slate-500 underline-offset-4 hover:underline"
         >
-          Just chat freely
+          {t('bubble.freely')}
         </button>
       </div>
     </section>

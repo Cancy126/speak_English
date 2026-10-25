@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import * as authApi from '../api/auth';
+import { errorMessage, isNetworkError } from '../api/request';
+import { session } from '../api/session';
 import type { User } from '../types';
 
 interface AuthState {
@@ -16,11 +18,8 @@ interface AuthState {
   logout: () => void;
 }
 
-// The axios request interceptor reads the token straight out of localStorage, so
-// it has to be persisted BEFORE the first authenticated call. Writing it only
-// after fetchMe meant every sign-in fetched /auth/me unauthenticated and died on 401.
-function sessionPatch(token: string, user: User) {
-  return { token, user, isAuthenticated: true, isAdmin: user.is_admin, loading: false };
+function signedIn(token: string, user: User) {
+  return { token, user, isAuthenticated: true, isAdmin: user.is_admin, loading: false, error: null };
 }
 
 const signedOut = {
@@ -31,25 +30,31 @@ const signedOut = {
   loading: false,
 };
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  token: localStorage.getItem('token'),
+  token: session.accessToken(),
   loading: false,
   error: null,
-  isAuthenticated: Boolean(localStorage.getItem('token')),
+  isAuthenticated: Boolean(session.accessToken()),
   isAdmin: false,
 
+  // The request interceptor reads credentials straight out of storage, so the pair has
+  // to be saved BEFORE the first authenticated call: saving after /auth/me made every
+  // sign-in fetch the profile unauthenticated and die on 401.
+  //
+  // Failure deliberately does NOT clear the session. A wrong password, or the tunnel
+  // blipping mid-request, has nothing to do with the credentials already in storage —
+  // deleting them is what made the learner log in on every visit.
   login: async (email, password) => {
     set({ loading: true, error: null });
     try {
-      const { access_token } = await authApi.login(email, password);
-      localStorage.setItem('token', access_token);
+      const { access_token, refresh_token } = await authApi.login(email, password);
+      session.save(access_token, refresh_token);
       const user = await authApi.fetchMe();
-      set(sessionPatch(access_token, user));
+      set(signedIn(access_token, user));
       return true;
     } catch (err) {
-      localStorage.removeItem('token');
-      set({ ...signedOut, error: errMessage(err) });
+      set({ loading: false, error: errorMessage(err) });
       return false;
     }
   },
@@ -57,41 +62,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (username, email, password) => {
     set({ loading: true, error: null });
     try {
-      const { access_token } = await authApi.register(username, email, password);
-      localStorage.setItem('token', access_token);
+      const { access_token, refresh_token } = await authApi.register(username, email, password);
+      session.save(access_token, refresh_token);
       const user = await authApi.fetchMe();
-      set(sessionPatch(access_token, user));
+      set(signedIn(access_token, user));
       return true;
     } catch (err) {
-      localStorage.removeItem('token');
-      set({ ...signedOut, error: errMessage(err) });
+      set({ loading: false, error: errorMessage(err) });
       return false;
     }
   },
 
   // Token survives a refresh, but the profile does not, so re-pull it.
   loadCurrentUser: async () => {
-    if (!get().token) return;
+    if (!session.accessToken()) return;
     set({ loading: true });
     try {
       const user = await authApi.fetchMe();
-      set({ user, isAdmin: user.is_admin, isAuthenticated: true, loading: false });
-    } catch {
-      localStorage.removeItem('token');
+      // Re-read from storage: the interceptor may have rotated the access token while
+      // this call was in flight, so get().token can already be stale here.
+      set(signedIn(session.accessToken() ?? '', user));
+    } catch (err) {
+      if (isNetworkError(err)) {
+        // Unreachable is not unauthorized: keep the session and let the next mount retry.
+        set({ loading: false, error: '连不上服务器，稍后自动重试' });
+        return;
+      }
+      session.clear();
       set({ ...signedOut });
     }
   },
 
   logout: () => {
-    localStorage.removeItem('token');
+    session.clear();
     set({ ...signedOut, error: null });
   },
 }));
-
-function errMessage(err: unknown): string {
-  if (err && typeof err === 'object' && 'response' in err) {
-    const res = (err as { response?: { data?: { detail?: string } } }).response;
-    if (res?.data?.detail) return res.data.detail;
-  }
-  return err instanceof Error ? err.message : 'Request failed';
-}

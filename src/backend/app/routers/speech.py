@@ -1,11 +1,14 @@
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.services.tts_service import tts_service
@@ -20,6 +23,26 @@ MAX_STT_BYTES = 10 * 1024 * 1024
 class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     voice: str | None = None
+
+
+TTS_NAME_RE = re.compile(r"^tts-[0-9a-f]{32}\.mp3$")
+
+
+@router.get("/tts-file/{name}")
+async def tts_file(name: str) -> FileResponse:
+    """Serve synthesized AI speech. Public by design, unlike learner recordings.
+
+    The name is a uuid4 hex, so it is unguessable, and the content is the reply
+    the model already wrote — not the learner's voice. Strict pattern rather than
+    a directory listing: `user-*` recordings in the same folder are only reachable
+    through the ownership-checked `/api/pronunciation/recordings/{id}` route.
+    """
+    if not TTS_NAME_RE.match(name):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found")
+    path = Path(settings.UPLOAD_DIR).resolve() / name
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found")
+    return FileResponse(path, media_type="audio/mpeg")
 
 
 @router.post("/tts")
@@ -38,7 +61,7 @@ async def synthesize(
             "fallback": "speech-synthesis",
             "text": body.text,
         }
-    return {"audio_url": f"/uploads/{path}", "fallback": None, "text": body.text}
+    return {"audio_url": path, "fallback": None, "text": body.text}
 
 
 @router.post("/transcribe")

@@ -21,22 +21,18 @@ from app.services.storage_service import StorageService
 logger = logging.getLogger(__name__)
 
 
-async def purge_expired_trash(db: AsyncSession, storage: StorageService | None = None) -> dict:
-    """Delete conversations trashed more than TRASH_RETENTION_DAYS ago.
+async def purge_conversations(
+    db: AsyncSession, conv_ids: list[int], storage: StorageService | None = None
+) -> dict:
+    """Physically delete conversations: audio files first, then cascading rows.
 
-    Returns {"conversations": n, "files": n, "file_errors": n}. Files are removed
-    first: if a delete fails we keep the rows so the next pass retries instead of
-    silently orphaning audio.
+    Shared by the 7-day trash sweep and the explicit "永久删除" action so both
+    follow the same order: files are removed before rows, and a file failure keeps
+    the rows behind it. Deleting the DB rows first would lose `file_path` and
+    strand the recording on disk forever — a disk leak and a privacy leak at once,
+    since ORM cascade cannot touch the filesystem.
     """
     storage = storage or StorageService()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.TRASH_RETENTION_DAYS)
-
-    result = await db.execute(
-        select(Conversation.id).where(
-            Conversation.deleted_at.is_not(None), Conversation.deleted_at < cutoff
-        )
-    )
-    conv_ids = list(result.scalars().all())
     if not conv_ids:
         return {"conversations": 0, "files": 0, "file_errors": 0}
 
@@ -59,20 +55,29 @@ async def purge_expired_trash(db: AsyncSession, storage: StorageService | None =
             failed += 1
 
     if failed:
-        # Leave everything for the next sweep rather than half-cleaning.
-        logger.warning("aborting purge: %d file(s) still present", failed)
+        logger.warning("aborting purge of %s: %d file(s) still present", conv_ids, failed)
         return {"conversations": 0, "files": removed, "file_errors": failed}
 
-    # ORM delete of the conversations lets the model-level cascade take
-    # messages / audio_assets / scores with it.
     for cid in conv_ids:
         conv = await db.get(Conversation, cid)
         if conv is not None:
             await db.delete(conv)
     await db.flush()
 
-    logger.info("purged %d trashed conversation(s), %d audio file(s)", len(conv_ids), removed)
+    logger.info("purged %d conversation(s), %d audio file(s)", len(conv_ids), removed)
     return {"conversations": len(conv_ids), "files": removed, "file_errors": 0}
+
+
+async def purge_expired_trash(db: AsyncSession, storage: StorageService | None = None) -> dict:
+    """Delete conversations trashed more than TRASH_RETENTION_DAYS ago."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.TRASH_RETENTION_DAYS)
+
+    result = await db.execute(
+        select(Conversation.id).where(
+            Conversation.deleted_at.is_not(None), Conversation.deleted_at < cutoff
+        )
+    )
+    return await purge_conversations(db, list(result.scalars().all()), storage)
 
 
 async def purge_orphan_audio(db: AsyncSession, storage: StorageService | None = None) -> int:

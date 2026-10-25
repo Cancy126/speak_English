@@ -10,6 +10,11 @@ from app.services.storage_service import StorageService
 
 logger = logging.getLogger(__name__)
 
+# Public, unauthenticated-by-design route for synthesized replies (see the strict
+# filename pattern in routers/speech.py). Learner recordings use the ownership-checked
+# /api/pronunciation/recordings/{id} route instead and must never be served from here.
+TTS_URL_PREFIX = "/api/speech/tts-file/"
+
 
 class TTSService:
     """AI reply -> mp3.
@@ -24,7 +29,13 @@ class TTSService:
         self.voice = settings.TTS_VOICE
 
     async def synthesize(self, text: str) -> str | None:
-        """Return a web-relative audio path, or None when TTS is unavailable."""
+        """Return a playable URL for the clip, or None when TTS is unavailable.
+
+        A URL, not the storage-relative path: `ChatReply.tts_url` and
+        `/api/speech/tts` both hand this straight to the browser, and the old value
+        ("audio/tts-xxx.mp3") pointed at nothing once the public /uploads mount went
+        away. One shape here keeps the two callers from disagreeing again.
+        """
         clean = text.strip()
         if not clean:
             return None
@@ -32,7 +43,7 @@ class TTSService:
         filename = f"tts-{uuid4().hex}.mp3"
         target: Path = self.storage.root / filename
         if await self._edge_tts(clean, target):
-            return self.storage.relative_path(filename)
+            return f"{TTS_URL_PREFIX}{filename}"
         return None
 
     async def _edge_tts(self, text: str, target: Path) -> bool:
